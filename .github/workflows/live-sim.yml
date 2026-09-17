@@ -1,11 +1,12 @@
-# live-sim-template-version: 1
+# live-sim-template-version: 2
 # ==============================================================================
 # live-sim GitHub Actions Workflow
 # ==============================================================================
-# This workflow boots an Apple Silicon iOS Simulator in ~60 seconds, pre-installs
-# the Expo Go runtime, starts serve-sim GPU screen capture + WebSocket control,
-# opens an outbound Cloudflare tunnel, and automatically opens your local machine's
-# Metro tunnel URL (exp://...) inside the simulator for instant live development.
+# This workflow boots an Apple Silicon iOS Simulator in ~60 seconds, dynamically
+# installs the exact Expo Go runtime matching your project's Expo SDK version,
+# starts serve-sim GPU screen capture + WebSocket control, opens an outbound
+# Cloudflare tunnel, and automatically opens your local machine's Metro tunnel URL
+# (exps://...) inside the simulator for instant live development.
 # ==============================================================================
 
 name: live-sim
@@ -21,7 +22,7 @@ on:
         description: "Secret token for auth gate"
         required: true
       local_tunnel_url:
-        description: "Local Metro tunnel URL (exp://...)"
+        description: "Local Metro tunnel URL (exps://... or exp://...)"
         default: ""
       minutes:
         description: "Session duration in minutes"
@@ -101,25 +102,49 @@ jobs:
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           echo "Simulator booted successfully."
 
-      # Step 4: Download and install Expo Go runtime on simulator
+      # Step 4: Download and install the exact matching Expo Go runtime for project's SDK
       - name: Install Expo Go
         timeout-minutes: 10
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
           set -euo pipefail
-          echo "Installing Expo Go on simulator $UDID..."
-          # Download latest official Expo Go simulator build from Expo CDN
+          echo "Detecting matching Expo SDK version for simulator $UDID..."
+
+          EXPO_VER=$(node -p "try { const p = require('./package.json'); (p.dependencies?.expo || p.devDependencies?.expo || '57.0.0').replace(/[\^~>=<]/g, ''); } catch(e) { '57.0.0'; }")
+          echo "Target Expo SDK version: $EXPO_VER"
+
+          EXPO_GO_URL=$(node -e "
+            fetch('https://api.expo.dev/v2/versions')
+              .then(r => r.json())
+              .then(data => {
+                const ver = '$EXPO_VER';
+                const major = ver.split('.')[0] + '.0.0';
+                const url = data.sdkVersions?.[major]?.iosClientUrl || data.sdkVersions?.[ver]?.iosClientUrl;
+                if (url) {
+                  console.log(url);
+                } else {
+                  console.log('https://github.com/expo/expo-go-releases/releases/download/Expo-Go-57.0.9/Expo-Go-57.0.9.tar.gz');
+                }
+              })
+              .catch(() => {
+                console.log('https://github.com/expo/expo-go-releases/releases/download/Expo-Go-57.0.9/Expo-Go-57.0.9.tar.gz');
+              });
+          ")
+
+          echo "Downloading Expo Go archive from: $EXPO_GO_URL"
           mkdir -p /tmp/expogo && cd /tmp/expogo
-          EXPO_GO_URL="https://dpq5q02fu5f55.cloudfront.net/Exponent-2.32.14.tar.gz"
           curl -fsSL -o Exponent.tar.gz "$EXPO_GO_URL" || true
 
           if [ -f Exponent.tar.gz ]; then
             tar -xzf Exponent.tar.gz
             EXPO_APP=$(find . -maxdepth 2 -name 'Expo Go.app' -o -name 'Exponent.app' | head -1)
             if [ -n "$EXPO_APP" ]; then
+              echo "Installing $EXPO_APP onto simulator $UDID..."
               xcrun simctl install "$UDID" "$EXPO_APP"
               echo "Expo Go installed successfully."
+            else
+              echo "::warning::No Expo app bundle found in archive"
             fi
           fi
 
@@ -213,7 +238,7 @@ jobs:
             echo "Live iOS Simulator stream is active at \`$TUNNEL\` for ${{ inputs.minutes }} minutes."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Step 8: Auto-open the developer's local Metro tunnel URL inside the simulator
+      # Step 8: Auto-launch Expo Go and connect to the local Metro dev server
       - name: Connect to Local Dev Server
         timeout-minutes: 5
         env:
@@ -222,9 +247,24 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "$TUNNEL_URL" ]; then
-            echo "Opening local dev server URL in simulator: $TUNNEL_URL"
-            # Launch Expo Go directly with the local exp:// tunnel URL
+            echo "Connecting iOS Simulator $UDID to local dev server: $TUNNEL_URL"
+
+            # 1. Warm-up launch of Expo Go
+            echo "Launching Expo Go runtime..."
+            xcrun simctl launch "$UDID" host.exp.Exponent || true
+            sleep 3
+
+            # 2. Open project URL in Expo Go (supporting both exps:// and exp://)
+            echo "Opening $TUNNEL_URL in Expo Go..."
             xcrun simctl openurl "$UDID" "$TUNNEL_URL" || true
+            sleep 2
+
+            # If exps:// scheme is used, also try exp:// as alias
+            if [[ "$TUNNEL_URL" == exps://* ]]; then
+              EXP_ALIAS="${TUNNEL_URL/exps:\/\//exp:\/\/}"
+              echo "Opening alias $EXP_ALIAS..."
+              xcrun simctl openurl "$UDID" "$EXP_ALIAS" || true
+            fi
           else
             echo "No local tunnel URL provided; simulator ready on home screen."
           fi
