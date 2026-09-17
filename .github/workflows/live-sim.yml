@@ -1,0 +1,248 @@
+# live-sim-template-version: 1
+# ==============================================================================
+# live-sim GitHub Actions Workflow
+# ==============================================================================
+# This workflow boots an Apple Silicon iOS Simulator in ~60 seconds, pre-installs
+# the Expo Go runtime, starts serve-sim GPU screen capture + WebSocket control,
+# opens an outbound Cloudflare tunnel, and automatically opens your local machine's
+# Metro tunnel URL (exp://...) inside the simulator for instant live development.
+# ==============================================================================
+
+name: live-sim
+run-name: "live-sim ${{ inputs.session }} (${{ inputs.minutes }}m)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      session:
+        description: "Session identifier"
+        required: true
+      gate_token:
+        description: "Secret token for auth gate"
+        required: true
+      local_tunnel_url:
+        description: "Local Metro tunnel URL (exp://...)"
+        default: ""
+      minutes:
+        description: "Session duration in minutes"
+        default: "60"
+      device:
+        description: "Simulator device name"
+        default: "iPhone 16 Pro"
+      max_dimension:
+        description: "Max pixel dimension for screen stream"
+        default: "900"
+      video_fps:
+        description: "Stream framerate"
+        default: "30"
+      video_quality:
+        description: "MJPEG quality"
+        default: "0.7"
+      runner:
+        description: "Runner image (must be arm64 macOS for serve-sim)"
+        default: "macos-15"
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: live-sim-${{ inputs.session }}
+  cancel-in-progress: true
+
+jobs:
+  stream:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      STATUS_CONTEXT: live-sim/${{ inputs.session }}
+      GATE_PORT: "3199"
+      PREVIEW_PORT: "3200"
+
+    steps:
+      # Step 1: Checkout repository for gate proxy and workflow files
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Setup Node.js 20 environment
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Step 3: Boot the Apple Silicon iOS Simulator
+      - name: Boot iOS Simulator
+        timeout-minutes: 10
+        id: sim
+        run: |
+          set -euo pipefail
+          DEVICE='${{ inputs.device }}'
+          echo "Locating simulator for device: $DEVICE"
+
+          UDID=$(xcrun simctl list devices available \
+            | grep -F "$DEVICE (" \
+            | head -1 \
+            | sed -E 's/.*\(([0-9A-Fa-f-]{36})\).*/\1/' || true)
+
+          if [ -z "$UDID" ]; then
+            echo "::warning::$DEVICE not found directly; falling back to newest iPhone"
+            UDID=$(xcrun simctl list devices available \
+              | grep -E '^\s+iPhone' \
+              | tail -1 \
+              | sed -E 's/.*\(([0-9A-Fa-f-]{36})\).*/\1/')
+          fi
+
+          [ -n "$UDID" ] || { echo "No iOS simulator available on runner image"; exit 1; }
+
+          echo "Booting simulator UDID: $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Simulator booted successfully."
+
+      # Step 4: Download and install Expo Go runtime on simulator
+      - name: Install Expo Go
+        timeout-minutes: 10
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          set -euo pipefail
+          echo "Installing Expo Go on simulator $UDID..."
+          # Download latest official Expo Go simulator build from Expo CDN
+          mkdir -p /tmp/expogo && cd /tmp/expogo
+          EXPO_GO_URL="https://dpq5q02fu5f55.cloudfront.net/Exponent-2.32.14.tar.gz"
+          curl -fsSL -o Exponent.tar.gz "$EXPO_GO_URL" || true
+
+          if [ -f Exponent.tar.gz ]; then
+            tar -xzf Exponent.tar.gz
+            EXPO_APP=$(find . -maxdepth 2 -name 'Expo Go.app' -o -name 'Exponent.app' | head -1)
+            if [ -n "$EXPO_APP" ]; then
+              xcrun simctl install "$UDID" "$EXPO_APP"
+              echo "Expo Go installed successfully."
+            fi
+          fi
+
+      # Step 5: Start serve-sim GPU screen capture & WebSocket input server
+      - name: Start serve-sim
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          ARGS=(
+            --detach --quiet
+            --port "$PREVIEW_PORT"
+            --max-dimension '${{ inputs.max_dimension }}'
+            --codec mjpeg
+            --mjpeg-fps '${{ inputs.video_fps }}'
+            --mjpeg-quality '${{ inputs.video_quality }}'
+          )
+
+          echo "Launching serve-sim daemon..."
+          npx --yes @expo/serve-sim@latest "${ARGS[@]}"
+
+          # Wait for serve-sim readiness endpoint
+          for _ in $(seq 1 90); do
+            if curl -fsS "http://127.0.0.1:$PREVIEW_PORT/readyz" >/dev/null 2>&1; then
+              echo "serve-sim is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "serve-sim failed to become ready"
+          exit 1
+
+      # Step 6: Start local Auth Gate reverse proxy
+      - name: Start Auth Gate
+        timeout-minutes: 5
+        env:
+          LIVE_SIM_GATE_TOKEN: ${{ inputs.gate_token }}
+        run: |
+          set -euo pipefail
+          LIVE_SIM_TARGET_PORT="$PREVIEW_PORT" LIVE_SIM_GATE_PORT="$GATE_PORT" \
+            nohup node .github/live-sim/gate.cjs > gate.log 2>&1 &
+          disown
+
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null "http://127.0.0.1:$GATE_PORT/__live-sim/healthz"; then
+              echo "Auth gate is active"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat gate.log; exit 1
+
+      # Step 7: Open Cloudflare tunnel and publish stream URL to GitHub commit status
+      - name: Open Cloudflare Tunnel
+        timeout-minutes: 10
+        id: tunnel
+        env:
+          GATE_TOKEN: ${{ inputs.gate_token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o cloudflared.tgz \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-arm64.tgz
+          tar -xzf cloudflared.tgz
+          chmod +x cloudflared
+
+          nohup ./cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$GATE_PORT" \
+            --logfile cloudflared.log > /dev/null 2>&1 &
+          disown
+
+          TUNNEL=""
+          for _ in $(seq 1 60); do
+            TUNNEL=$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' cloudflared.log 2>/dev/null | head -1 || true)
+            [ -n "$TUNNEL" ] && break
+            sleep 2
+          done
+          [ -n "$TUNNEL" ] || { echo "cloudflared failed to report tunnel URL"; tail -50 cloudflared.log; exit 1; }
+
+          STREAM_URL="$TUNNEL/?k=$GATE_TOKEN"
+          echo "url=$STREAM_URL" >> "$GITHUB_OUTPUT"
+
+          # Publish commit status for local CLI discovery
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state=success \
+            -f "context=$STATUS_CONTEXT" \
+            -f "target_url=$TUNNEL" \
+            -f "description=Simulator live (Zero-push Live Mode)"
+
+          echo "::notice title=live-sim::$TUNNEL"
+          {
+            echo "## live-sim"
+            echo
+            echo "Live iOS Simulator stream is active at \`$TUNNEL\` for ${{ inputs.minutes }} minutes."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Step 8: Auto-open the developer's local Metro tunnel URL inside the simulator
+      - name: Connect to Local Dev Server
+        timeout-minutes: 5
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+          TUNNEL_URL: ${{ inputs.local_tunnel_url }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TUNNEL_URL" ]; then
+            echo "Opening local dev server URL in simulator: $TUNNEL_URL"
+            # Launch Expo Go directly with the local exp:// tunnel URL
+            xcrun simctl openurl "$UDID" "$TUNNEL_URL" || true
+          else
+            echo "No local tunnel URL provided; simulator ready on home screen."
+          fi
+
+      # Step 9: Keep runner alive while streaming
+      - name: Stream Keep-Alive Loop
+        timeout-minutes: 360
+        run: |
+          set -euo pipefail
+          MINUTES=${{ inputs.minutes }}
+          END=$(( $(date +%s) + MINUTES * 60 ))
+          echo "Keeping live stream open until $(date -r "$END" '+%Y-%m-%d %H:%M:%S')..."
+
+          while [ "$(date +%s)" -lt "$END" ]; do
+            curl -fsS -o /dev/null "http://127.0.0.1:$PREVIEW_PORT/healthz" || {
+              echo "serve-sim daemon closed; ending session"
+              exit 1
+            }
+            sleep 15
+          done
+          echo "Stream duration finished."

@@ -1,1 +1,5 @@
 node_modules
+.live-sim
+*.log
+node_modules/
+.expo/
