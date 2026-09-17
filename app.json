@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Dual-Engine Music",
+    "slug": "dual-engine-music-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#080E1E"
+      },
+      "permissions": [
+        "INTERNET",
+        "WAKE_LOCK"
+      ],
+      "package": "com.anonymous.dualenginemusicapp"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
