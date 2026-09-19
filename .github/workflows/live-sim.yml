@@ -1,4 +1,4 @@
-# live-sim-template-version: 2
+# live-sim-template-version: 3
 # ==============================================================================
 # live-sim GitHub Actions Workflow
 # ==============================================================================
@@ -105,6 +105,7 @@ jobs:
       # Step 4: Download and install the exact matching Expo Go runtime for project's SDK
       - name: Install Expo Go
         timeout-minutes: 10
+        id: expogo
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
@@ -133,19 +134,35 @@ jobs:
           ")
 
           echo "Downloading Expo Go archive from: $EXPO_GO_URL"
-          mkdir -p /tmp/expogo && cd /tmp/expogo
-          curl -fsSL -o Exponent.tar.gz "$EXPO_GO_URL" || true
+          mkdir -p /tmp/expogo_raw && cd /tmp/expogo_raw
+          curl -fsSL -o Exponent.tar.gz "$EXPO_GO_URL"
 
-          if [ -f Exponent.tar.gz ]; then
-            tar -xzf Exponent.tar.gz
-            EXPO_APP=$(find . -maxdepth 2 -name 'Expo Go.app' -o -name 'Exponent.app' | head -1)
-            if [ -n "$EXPO_APP" ]; then
-              echo "Installing $EXPO_APP onto simulator $UDID..."
-              xcrun simctl install "$UDID" "$EXPO_APP"
-              echo "Expo Go installed successfully."
-            else
-              echo "::warning::No Expo app bundle found in archive"
-            fi
+          # Extract archive contents
+          tar -xzf Exponent.tar.gz
+
+          # Determine the .app bundle directory
+          EXPO_APP=$(find /tmp/expogo_raw -maxdepth 3 -type d -name '*.app' | head -1)
+
+          if [ -z "$EXPO_APP" ] && [ -f "/tmp/expogo_raw/Info.plist" ]; then
+            # The archive root contains the app bundle contents directly
+            mkdir -p /tmp/Exponent.app
+            find /tmp/expogo_raw -mindepth 1 -maxdepth 1 ! -name 'Exponent.tar.gz' -exec mv {} /tmp/Exponent.app/ \;
+            EXPO_APP="/tmp/Exponent.app"
+          fi
+
+          if [ -n "$EXPO_APP" ] && [ -d "$EXPO_APP" ]; then
+            echo "Found Expo Go app bundle at: $EXPO_APP"
+            BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$EXPO_APP/Info.plist" 2>/dev/null || echo "host.exp.Exponent")
+            echo "Bundle identifier: $BUNDLE_ID"
+            echo "bundle_id=$BUNDLE_ID" >> "$GITHUB_OUTPUT"
+
+            echo "Installing $EXPO_APP onto simulator $UDID..."
+            xcrun simctl install "$UDID" "$EXPO_APP"
+            echo "Expo Go installed successfully."
+          else
+            echo "::error::No valid Expo app bundle found in archive"
+            ls -la /tmp/expogo_raw
+            exit 1
           fi
 
       # Step 5: Start serve-sim GPU screen capture & WebSocket input server
@@ -243,16 +260,18 @@ jobs:
         timeout-minutes: 5
         env:
           UDID: ${{ steps.sim.outputs.udid }}
+          BUNDLE_ID: ${{ steps.expogo.outputs.bundle_id }}
           TUNNEL_URL: ${{ inputs.local_tunnel_url }}
         run: |
           set -euo pipefail
+          APP_ID="${BUNDLE_ID:-host.exp.Exponent}"
           if [ -n "$TUNNEL_URL" ]; then
-            echo "Connecting iOS Simulator $UDID to local dev server: $TUNNEL_URL"
+            echo "Connecting iOS Simulator $UDID to local dev server: $TUNNEL_URL (App ID: $APP_ID)"
 
             # 1. Warm-up launch of Expo Go
-            echo "Launching Expo Go runtime..."
-            xcrun simctl launch "$UDID" host.exp.Exponent || true
-            sleep 3
+            echo "Launching Expo Go runtime ($APP_ID)..."
+            xcrun simctl launch "$UDID" "$APP_ID" || true
+            sleep 4
 
             # 2. Open project URL in Expo Go (supporting both exps:// and exp://)
             echo "Opening $TUNNEL_URL in Expo Go..."
