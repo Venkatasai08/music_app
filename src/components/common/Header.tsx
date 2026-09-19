@@ -10,7 +10,7 @@ interface HeaderProps {
   title?: string;
 }
 
-export const Header: React.FC<HeaderProps> = React.memo(({ onSearchPress, title = 'Discover' }) => {
+export const Header: React.FC<HeaderProps> = React.memo(({ onSearchPress, title = 'Music sfgs Player' }) => {
   const { colors } = useAppTheme();
   const isPlayRangeEnabled = usePlayerStore((s) => s.isPlayRangeEnabled);
   const togglePlayRangeMode = usePlayerStore((s) => s.togglePlayRangeMode);
@@ -19,7 +19,7 @@ export const Header: React.FC<HeaderProps> = React.memo(({ onSearchPress, title 
     <View style={styles.headerContainer}>
       {/* Top row: Screen Title ("Discover") + Action Pills */}
       <View style={styles.topRow}>
-        <View style={styles.titleSection}>
+        <View style={styles.titleSection}>``
           <Text style={styles.screenTitle}>{title}</Text>
         </View>
 

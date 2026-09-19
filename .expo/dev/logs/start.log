@@ -1883,3 +1883,20 @@
 {"_e":"metro:config","_t":1789820457663,"serverRoot":"../..\\..","projectRoot":"../..\\..","exporting":false,"flags":{"autolinkingModuleResolution":false,"serverActions":false,"serverComponents":false,"reactCompiler":false,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
 {"_e":"expo:dev-tools-plugin:load","_t":1789820458204,"plugins":[]}
 {"_e":"metro:instantiate","_t":1789820475248,"atlas":false,"workers":6,"host":"::","port":8081}
+{"_e":"root:init","_t":1789821985374,"format":"v0-jsonl","version":"57.0.24"}
+{"_e":"env:mode","_t":1789821985375,"nodeEnv":"development","babelEnv":"development","mode":"development"}
+{"_e":"env:load","_t":1789821985378,"mode":"development","files":[],"env":{}}
+{"_e":"devserver:start","_t":1789821985778,"mode":"development","web":true,"baseUrl":"","asyncRoutes":false,"routerRoot":"../..\\..\\app","serverComponents":false,"serverActions":false,"serverRendering":false,"apiRoutes":false,"exporting":false}
+{"_e":"metro:config","_t":1789821986424,"serverRoot":"../..\\..","projectRoot":"../..\\..","exporting":false,"flags":{"autolinkingModuleResolution":false,"serverActions":false,"serverComponents":false,"reactCompiler":false,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
+{"_e":"expo:dev-tools-plugin:load","_t":1789821986832,"plugins":[]}
+{"_e":"metro:instantiate","_t":1789822001930,"atlas":false,"workers":6,"host":"::","port":8081}
+{"_e":"root:init","_t":1789829312963,"format":"v0-jsonl","version":"57.0.24"}
+{"_e":"env:mode","_t":1789829312967,"nodeEnv":"development","babelEnv":"development","mode":"development"}
+{"_e":"env:load","_t":1789829312972,"mode":"development","files":[],"env":{}}
+{"_e":"devserver:start","_t":1789829313604,"mode":"development","web":true,"baseUrl":"","asyncRoutes":false,"routerRoot":"../..\\..\\app","serverComponents":false,"serverActions":false,"serverRendering":false,"apiRoutes":false,"exporting":false}
+{"_e":"metro:config","_t":1789829314436,"serverRoot":"../..\\..","projectRoot":"../..\\..","exporting":false,"flags":{"autolinkingModuleResolution":false,"serverActions":false,"serverComponents":false,"reactCompiler":false,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
+{"_e":"expo:dev-tools-plugin:load","_t":1789829315042,"plugins":[]}
+{"_e":"metro:instantiate","_t":1789829332204,"atlas":false,"workers":6,"host":"::","port":8081}
+{"_e":"metro:bundling:started","_t":1789829799082,"id":"2","platform":"ios","environment":null,"entry":"index.ts"}
+{"_e":"metro:bundling:done","_t":1789829839796,"id":"2","total":2470,"ms":40712.2252}
+{"_e":"metro:client_log","_t":1789829854102,"level":"warn","data":["Due to changes in Androids permission requirements, Expo Go can no longer provide full access to the media library. To test the full functionality of this module, you can create a development build. https://docs.expo.dev/develop/development-builds/create-a-build"]}
