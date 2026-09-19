@@ -1,4 +1,4 @@
-# live-sim-template-version: 3
+# live-sim-template-version: 4
 # ==============================================================================
 # live-sim GitHub Actions Workflow
 # ==============================================================================
@@ -237,6 +237,18 @@ jobs:
             sleep 2
           done
           [ -n "$TUNNEL" ] || { echo "cloudflared failed to report tunnel URL"; tail -50 cloudflared.log; exit 1; }
+
+          echo "Discovered tunnel: $TUNNEL"
+          echo "Verifying public tunnel reachability before publishing status..."
+          for i in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" "$TUNNEL/__live-sim/healthz" || true)
+            if [ "$CODE" = "200" ]; then
+              echo "Public tunnel is verified healthy (HTTP 200) after ${i} checks!"
+              break
+            fi
+            echo "Waiting for tunnel edge DNS & routing (HTTP $CODE)..."
+            sleep 2
+          done
 
           STREAM_URL="$TUNNEL/?k=$GATE_TOKEN"
           echo "url=$STREAM_URL" >> "$GITHUB_OUTPUT"

@@ -1,4 +1,4 @@
-// live-sim-template-version: 1
+// live-sim-template-version: 2
 /**
  * ============================================================================
  * live-sim Reverse Proxy Auth Gate (gate.cjs)
@@ -81,6 +81,12 @@ function authorize(req) {
     }
   } catch {}
 
+  // Check Bearer authorization header
+  const authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ') && timingSafeEqual(authHeader.slice(7).trim(), TOKEN)) {
+    return 'bearer';
+  }
+
   return false;
 }
 
@@ -122,9 +128,9 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Preserve and forward Host headers for serve-sim WebSockets
+  // Preserve and normalize headers for serve-sim
   const headers = { ...req.headers };
-  headers['host'] = req.headers['host'] || '127.0.0.1';
+  headers['host'] = `${TARGET_HOST}:${TARGET_PORT}`;
   headers['x-forwarded-host'] = req.headers['host'] || '';
   headers['x-forwarded-proto'] = 'https';
 
@@ -181,7 +187,10 @@ server.on('upgrade', (req, socket, head) => {
 
   const targetSocket = net.connect(TARGET_PORT, TARGET_HOST, () => {
     const rawHeaders = Object.entries(req.headers)
-      .map(([k, v]) => `${k}: ${v}`)
+      .map(([k, v]) => {
+        if (k.toLowerCase() === 'host') return `host: ${TARGET_HOST}:${TARGET_PORT}`;
+        return `${k}: ${v}`;
+      })
       .join('\r\n');
     targetSocket.write(`${req.method} ${req.url} HTTP/${req.httpVersion}\r\n${rawHeaders}\r\n\r\n`);
     if (head && head.length) targetSocket.write(head);
